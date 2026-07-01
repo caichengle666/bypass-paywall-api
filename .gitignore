@@ -1,0 +1,27 @@
+# Binaries
+bpc-api.exe
+bpc-api
+*.exe~
+*.exe
+
+# Temp files
+req.json
+bpc_out.txt
+bpc_err.txt
+homepage.html
+raw_homepage.json
+homepage_test.json
+homepage_v3.json
+cat_*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
