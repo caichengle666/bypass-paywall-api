@@ -10,6 +10,7 @@ import (
   "time"
   "github.com/chromedp/chromedp"
   "github.com/chromedp/cdproto/network"
+  "github.com/chromedp/cdproto/page"
 )
 
 type Pool struct {
@@ -59,25 +60,33 @@ func (p *Pool) newBrowser() (*Browser, error) {
       if _, err := os.Stat(filepath.Join(c, "manifest.json")); err == nil { bpcPath = c; break }
     }
   }
+
   opts := []chromedp.ExecAllocatorOption{
     chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck, chromedp.DisableGPU,
-    chromedp.Flag("disable-web-security", true),
-    chromedp.Flag("ignore-certificate-errors", true),
     chromedp.Flag("no-sandbox", true),
     chromedp.Flag("disable-dev-shm-usage", true),
+    chromedp.WindowSize(1920, 1080),
     chromedp.Flag("disable-blink-features", "AutomationControlled"),
     chromedp.Flag("disable-component-update", true),
     chromedp.Flag("disable-background-networking", true),
     chromedp.Flag("disable-sync", true),
     chromedp.Flag("no-first-run", true),
+    chromedp.Flag("use-gl", "angle"),
+    chromedp.Flag("use-angle", "swiftshader"),
+    chromedp.Flag("disable-webrtc", true),
+    chromedp.Flag("lang", "en-US,en;q=0.9,zh-CN;q=0.8"),
+    chromedp.Flag("disable-web-security", true),
+    chromedp.Flag("ignore-certificate-errors", true),
     chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"),
   }
+
   if p.chromePath != "" { opts = append(opts, chromedp.ExecPath(p.chromePath)) }
   if bpcPath != "" {
     opts = append(opts, chromedp.Flag("disable-extensions-except", bpcPath), chromedp.Flag("load-extension", bpcPath))
     log.Printf("[browser] BPC extension: %s", bpcPath)
   }
   if p.proxy != "" { opts = append(opts, chromedp.ProxyServer(p.proxy)) }
+
   allocCtx, cancel1 := chromedp.NewExecAllocator(context.Background(), opts...)
   ctx, cancel2 := chromedp.NewContext(allocCtx)
   if err := chromedp.Run(ctx); err != nil { cancel2(); cancel1(); return nil, fmt.Errorf("start: %w", err) }
@@ -110,6 +119,11 @@ func (b *Browser) Navigate(rawURL string, h map[string]string) (string, error) {
         {URLPattern: "*://*.zephr.com/*", Block: true},
         {URLPattern: "*://*.cxense.com/*", Block: true},
         {URLPattern: "*://*.blueconic.com/*", Block: true},
+        {URLPattern: "*://*.newrelic.com/*", Block: true},
+        {URLPattern: "*://*.nr-data.net/*", Block: true},
+        {URLPattern: "*://*.datadome.co/*", Block: true},
+        {URLPattern: "*://*.js.datadome.co/*", Block: true},
+        {URLPattern: "*://*.api-js.datadome.co/*", Block: true},
       }
       return network.SetBlockedURLs().WithURLPatterns(blockedPatterns).Do(ctx)
     }),
@@ -119,9 +133,18 @@ func (b *Browser) Navigate(rawURL string, h map[string]string) (string, error) {
       for k, v := range h { hdr[k] = v }
       return network.SetExtraHTTPHeaders(network.Headers(hdr)).Do(ctx)
     }),
+    chromedp.ActionFunc(func(ctx context.Context) error {
+      _, err := page.AddScriptToEvaluateOnNewDocument(`(function(){
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US','en','zh-CN']});
+        window.chrome = {runtime: {}};
+      })()`).Do(ctx)
+      return err
+    }),
     chromedp.Navigate(rawURL),
     chromedp.WaitReady("body"),
-    chromedp.Sleep(18*time.Second),
+    chromedp.Sleep(12*time.Second),
     chromedp.OuterHTML("html", &html),
   )
   if err != nil { return "", fmt.Errorf("navigate: %w", err) }
