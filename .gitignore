@@ -15,5 +15,11 @@ test_*.py
 Thumbs.db
 .vscode/
 .idea/
+
+# BPC extension releases (keep source)
+*.xpi
+*.crx
+*.zip
+bpc-src/
 *.json
-bpc-latest
+*.log
