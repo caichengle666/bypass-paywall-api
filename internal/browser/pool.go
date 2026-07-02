@@ -112,7 +112,6 @@ func (p *Pool) ActiveCount() int { return int(atomic.LoadInt32(&p.inUse)) }
 func (p *Pool) Shutdown()        {}
 func (b *Browser) Close()        { b.cancel() }
 
-// blockedPatterns returns common paywall/tracking domains to block.
 func blockedPatterns() []*network.BlockPattern {
   return []*network.BlockPattern{
     {URLPattern: "*://*.piano.io/*", Block: true},
@@ -130,7 +129,6 @@ func blockedPatterns() []*network.BlockPattern {
   }
 }
 
-// antiDetectionJS injects covers to fool common bot detectors.
 func antiDetectionJS() string {
   return `(()=>{
     Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
@@ -140,7 +138,6 @@ func antiDetectionJS() string {
   })()`
 }
 
-// antiDetectionStep is the chromedp action for injecting anti-detection script.
 func antiDetectionStep() chromedp.Action {
   return chromedp.ActionFunc(func(ctx context.Context) error {
     _, err := page.AddScriptToEvaluateOnNewDocument(antiDetectionJS()).Do(ctx)
@@ -148,11 +145,61 @@ func antiDetectionStep() chromedp.Action {
   })
 }
 
-// Navigate opens a URL and waits sleepTime before returning outer HTML.
+func hostExtract(rawURL string) string {
+  host := ""
+  if i := indexStr(rawURL, "://"); i >= 0 {
+    rest := rawURL[i+3:]
+    if j := indexStr(rest, "/"); j >= 0 {
+      host = rest[:j]
+    } else {
+      host = rest
+    }
+  }
+  if len(host) > 4 && host[:4] == "www." { host = host[4:] }
+  return host
+}
+
+func indexStr(s, sub string) int {
+  for i := 0; i+len(sub) <= len(s); i++ {
+    if s[i:i+len(sub)] == sub { return i }
+  }
+  return -1
+}
+
+func siteWaitSelectors(rawURL string) []string {
+  switch hostExtract(rawURL) {
+  case "nytimes.com", "cn.nytimes.com":
+    return []string{
+      "[data-testid='article-body']",
+      ".StoryBodyCompanionColumn",
+      "#article-body",
+      "[class*='article-body']",
+    }
+  case "economist.com":
+    return []string{"[class*='article-body']", "[class*='blog-post']"}
+  case "ft.com":
+    return []string{"[class*='article__content-body']"}
+  default:
+    return nil
+  }
+}
+
+func waitForSelector(sel string, timeout time.Duration) chromedp.Action {
+  return chromedp.ActionFunc(func(ctx context.Context) error {
+    deadline := time.Now().Add(timeout)
+    for {
+      var found bool
+      err := chromedp.Evaluate(fmt.Sprintf(`(()=>{var e=document.querySelector('%s');return e&&e.innerText&&e.innerText.trim().length>50;})()`, sel), &found).Do(ctx)
+      if err == nil && found { return nil }
+      if time.Now().After(deadline) { return nil }
+      time.Sleep(500 * time.Millisecond)
+    }
+  })
+}
+
 func (b *Browser) Navigate(rawURL string, h map[string]string, sleepTime time.Duration) (string, error) {
   ctx, cancel := context.WithTimeout(b.ctx, 120*time.Second)
   defer cancel()
-
   tabCtx, tabCancel := chromedp.NewContext(ctx)
   defer tabCancel()
 
@@ -176,15 +223,13 @@ func (b *Browser) Navigate(rawURL string, h map[string]string, sleepTime time.Du
   return html, nil
 }
 
-// NavigateAndEval navigates in a dedicated tab, waits sleepTime, evaluates JS, returns result.
 func (b *Browser) NavigateAndEval(rawURL string, headers map[string]string, jsCode string, sleepTime time.Duration, result interface{}) error {
   ctx, cancel := context.WithTimeout(b.ctx, 120*time.Second)
   defer cancel()
-
   tabCtx, tabCancel := chromedp.NewContext(ctx)
   defer tabCancel()
 
-  return chromedp.Run(tabCtx,
+  actions := []chromedp.Action{
     chromedp.ActionFunc(func(ctx context.Context) error { return network.Enable().Do(ctx) }),
     chromedp.ActionFunc(func(ctx context.Context) error { return network.SetBlockedURLs().WithURLPatterns(blockedPatterns()).Do(ctx) }),
     chromedp.ActionFunc(func(ctx context.Context) error {
@@ -196,7 +241,18 @@ func (b *Browser) NavigateAndEval(rawURL string, headers map[string]string, jsCo
     antiDetectionStep(),
     chromedp.Navigate(rawURL),
     chromedp.WaitReady("body"),
-    chromedp.Sleep(sleepTime),
-    chromedp.Evaluate(jsCode, result),
-  )
+  }
+
+  sels := siteWaitSelectors(rawURL)
+  if len(sels) > 0 {
+    for _, sel := range sels {
+      actions = append(actions, waitForSelector(sel, 10*time.Second))
+    }
+  }
+
+  if sleepTime <= 0 { sleepTime = 12 * time.Second }
+  actions = append(actions, chromedp.Sleep(sleepTime))
+  actions = append(actions, chromedp.Evaluate(jsCode, result))
+
+  return chromedp.Run(tabCtx, actions...)
 }
