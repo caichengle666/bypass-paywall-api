@@ -27,3 +27,6 @@ Thumbs.db
 vendor/
 
 bpc-latest/
+
+*.html
+*.json
