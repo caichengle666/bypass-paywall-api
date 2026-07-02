@@ -21,6 +21,7 @@ type Server struct{
 type FetchReq struct {
   URL     string `json:"url"`
   Timeout int    `json:"timeout,omitempty"`
+  Sleep   int    `json:"sleep,omitempty"`
 }
 type FetchResp struct {
   Success    bool        `json:"success"`
@@ -98,6 +99,14 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
   })
 }
 
+// computeSleep returns sleep duration from request or default.
+func computeSleep(req *FetchReq) time.Duration {
+  if req.Sleep > 0 && req.Sleep <= 30 {
+    return time.Duration(req.Sleep) * time.Second
+  }
+  return 12 * time.Second
+}
+
 func (s *Server) fetch(w http.ResponseWriter, r *http.Request) {
   req, err := parseReq(r)
   if err != nil { writeErr(w, err.Error(), 400); return }
@@ -106,7 +115,7 @@ func (s *Server) fetch(w http.ResponseWriter, r *http.Request) {
   br, err := s.bp.Acquire()
   if err != nil { writeErr(w, "browser: "+err.Error(), 503); return }
   defer s.bp.Release(br)
-  html, err := br.Navigate(req.URL, strategy.BuildHeaders(strat, req.URL))
+  html, err := br.Navigate(req.URL, strategy.BuildHeaders(strat, req.URL), computeSleep(req))
   if err != nil { writeErr(w, "navigate: "+err.Error(), 504); return }
   art := extract.ExtractFromHTML(html)
   json.NewEncoder(w).Encode(FetchResp{
@@ -127,7 +136,7 @@ func (s *Server) fetchJS(w http.ResponseWriter, r *http.Request) {
   defer s.bp.Release(br)
 
   var result jsResult
-  err = br.NavigateAndEval(req.URL, strategy.BuildHeaders(strat, req.URL), extract.ArticleExtractionJS, &result)
+  err = br.NavigateAndEval(req.URL, strategy.BuildHeaders(strat, req.URL), extract.ArticleExtractionJS, computeSleep(req), &result)
   if err != nil { writeErr(w, "navigate/js: "+err.Error(), 504); return }
 
   resp := FetchResp{
@@ -161,7 +170,6 @@ func parseReq(r *http.Request) (*FetchReq, error) {
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil { return nil, err }
   } else { req.URL = r.URL.Query().Get("url") }
   if req.URL == "" { return nil, fmt.Errorf("url required") }
-  if req.Timeout <= 0 || req.Timeout > 30 { req.Timeout = 15 }
   return &req, nil
 }
 

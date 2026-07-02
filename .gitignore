@@ -15,3 +15,5 @@ test_*.py
 Thumbs.db
 .vscode/
 .idea/
+*.json
+bpc-latest

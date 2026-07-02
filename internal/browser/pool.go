@@ -46,9 +46,7 @@ func (p *Pool) Start() error {
         candidates = append([]string{abs}, candidates...)
       }
       for _, c := range candidates {
-        if _, err := os.Stat(filepath.Join(c, "manifest.json")); err == nil {
-          p.bpcPath = c; break
-        }
+        if _, err := os.Stat(filepath.Join(c, "manifest.json")); err == nil { p.bpcPath = c; break }
       }
     }
   }
@@ -56,22 +54,16 @@ func (p *Pool) Start() error {
   return nil
 }
 
-// Acquire creates a fresh isolated browser. Blocks if maxBrowsers reached.
 func (p *Pool) Acquire() (*Browser, error) {
   for {
     cur := atomic.LoadInt32(&p.inUse)
     if cur >= int32(p.maxBrowsers) {
       return nil, fmt.Errorf("max concurrent browsers (%d) reached", p.maxBrowsers)
     }
-    if atomic.CompareAndSwapInt32(&p.inUse, cur, cur+1) {
-      break
-    }
+    if atomic.CompareAndSwapInt32(&p.inUse, cur, cur+1) { break }
   }
   b, err := p.newBrowser()
-  if err != nil {
-    atomic.AddInt32(&p.inUse, -1)
-    return nil, err
-  }
+  if err != nil { atomic.AddInt32(&p.inUse, -1); return nil, err }
   return b, nil
 }
 
@@ -96,30 +88,19 @@ func (p *Pool) newBrowser() (*Browser, error) {
   }
   if p.chromePath != "" { opts = append(opts, chromedp.ExecPath(p.chromePath)) }
   if p.bpcPath != "" {
-    opts = append(opts,
-      chromedp.Flag("disable-extensions-except", p.bpcPath),
-      chromedp.Flag("load-extension", p.bpcPath),
-    )
+    opts = append(opts, chromedp.Flag("disable-extensions-except", p.bpcPath), chromedp.Flag("load-extension", p.bpcPath))
     log.Printf("[browser] bpc-extension: %s", p.bpcPath)
   }
   if p.proxy != "" { opts = append(opts, chromedp.ProxyServer(p.proxy)) }
 
   allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
   ctx, ctxCancel := chromedp.NewContext(allocCtx)
-  if err := chromedp.Run(ctx); err != nil {
-    ctxCancel(); allocCancel()
-    return nil, fmt.Errorf("browser start: %w", err)
-  }
+  if err := chromedp.Run(ctx); err != nil { ctxCancel(); allocCancel(); return nil, fmt.Errorf("browser start: %w", err) }
 
   id := nextID.Add(1)
-  return &Browser{
-    ctx:    ctx,
-    cancel: func() { ctxCancel(); allocCancel() },
-    id:     id,
-  }, nil
+  return &Browser{ctx: ctx, cancel: func() { ctxCancel(); allocCancel() }, id: id}, nil
 }
 
-// Release closes the browser immediately.
 func (p *Pool) Release(b *Browser) {
   if b == nil { return }
   b.Close()
@@ -131,10 +112,45 @@ func (p *Pool) ActiveCount() int { return int(atomic.LoadInt32(&p.inUse)) }
 func (p *Pool) Shutdown()        {}
 func (b *Browser) Close()        { b.cancel() }
 
-// Navigate creates a dedicated tab, navigates, and returns the outer HTML.
-// The tab is closed before returning.
-func (b *Browser) Navigate(rawURL string, h map[string]string) (string, error) {
-  ctx, cancel := context.WithTimeout(b.ctx, 90*time.Second)
+// blockedPatterns returns common paywall/tracking domains to block.
+func blockedPatterns() []*network.BlockPattern {
+  return []*network.BlockPattern{
+    {URLPattern: "*://*.piano.io/*", Block: true},
+    {URLPattern: "*://*.tinypass.com/*", Block: true},
+    {URLPattern: "*://*.poool.fr/*", Block: true},
+    {URLPattern: "*://*.permutive.com/*", Block: true},
+    {URLPattern: "*://*.zephr.com/*", Block: true},
+    {URLPattern: "*://*.cxense.com/*", Block: true},
+    {URLPattern: "*://*.blueconic.com/*", Block: true},
+    {URLPattern: "*://*.newrelic.com/*", Block: true},
+    {URLPattern: "*://*.nr-data.net/*", Block: true},
+    {URLPattern: "*://*.datadome.co/*", Block: true},
+    {URLPattern: "*://*.js.datadome.co/*", Block: true},
+    {URLPattern: "*://*.api-js.datadome.co/*", Block: true},
+  }
+}
+
+// antiDetectionJS injects covers to fool common bot detectors.
+func antiDetectionJS() string {
+  return `(()=>{
+    Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+    Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
+    Object.defineProperty(navigator,'languages',{get:()=>['en-US','en','zh-CN']});
+    window.chrome={runtime:{}};
+  })()`
+}
+
+// antiDetectionStep is the chromedp action for injecting anti-detection script.
+func antiDetectionStep() chromedp.Action {
+  return chromedp.ActionFunc(func(ctx context.Context) error {
+    _, err := page.AddScriptToEvaluateOnNewDocument(antiDetectionJS()).Do(ctx)
+    return err
+  })
+}
+
+// Navigate opens a URL and waits sleepTime before returning outer HTML.
+func (b *Browser) Navigate(rawURL string, h map[string]string, sleepTime time.Duration) (string, error) {
+  ctx, cancel := context.WithTimeout(b.ctx, 120*time.Second)
   defer cancel()
 
   tabCtx, tabCancel := chromedp.NewContext(ctx)
@@ -143,51 +159,26 @@ func (b *Browser) Navigate(rawURL string, h map[string]string) (string, error) {
   var html string
   err := chromedp.Run(tabCtx,
     chromedp.ActionFunc(func(ctx context.Context) error { return network.Enable().Do(ctx) }),
-    chromedp.ActionFunc(func(ctx context.Context) error {
-      patterns := []*network.BlockPattern{
-        {URLPattern: "*://*.piano.io/*", Block: true},
-        {URLPattern: "*://*.tinypass.com/*", Block: true},
-        {URLPattern: "*://*.poool.fr/*", Block: true},
-        {URLPattern: "*://*.permutive.com/*", Block: true},
-        {URLPattern: "*://*.zephr.com/*", Block: true},
-        {URLPattern: "*://*.cxense.com/*", Block: true},
-        {URLPattern: "*://*.blueconic.com/*", Block: true},
-        {URLPattern: "*://*.newrelic.com/*", Block: true},
-        {URLPattern: "*://*.nr-data.net/*", Block: true},
-        {URLPattern: "*://*.datadome.co/*", Block: true},
-        {URLPattern: "*://*.js.datadome.co/*", Block: true},
-        {URLPattern: "*://*.api-js.datadome.co/*", Block: true},
-      }
-      return network.SetBlockedURLs().WithURLPatterns(patterns).Do(ctx)
-    }),
+    chromedp.ActionFunc(func(ctx context.Context) error { return network.SetBlockedURLs().WithURLPatterns(blockedPatterns()).Do(ctx) }),
     chromedp.ActionFunc(func(ctx context.Context) error {
       if len(h) == 0 { return nil }
       hdr := make(network.Headers)
       for k, v := range h { hdr[k] = v }
       return network.SetExtraHTTPHeaders(network.Headers(hdr)).Do(ctx)
     }),
-    chromedp.ActionFunc(func(ctx context.Context) error {
-      _, err := page.AddScriptToEvaluateOnNewDocument(`(()=>{
-        Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-        Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
-        Object.defineProperty(navigator,'languages',{get:()=>['en-US','en','zh-CN']});
-        window.chrome={runtime:{}};
-      })()`).Do(ctx)
-      return err
-    }),
+    antiDetectionStep(),
     chromedp.Navigate(rawURL),
     chromedp.WaitReady("body"),
-    chromedp.Sleep(12*time.Second),
+    chromedp.Sleep(sleepTime),
     chromedp.OuterHTML("html", &html),
   )
   if err != nil { return "", fmt.Errorf("navigate: %w", err) }
   return html, nil
 }
 
-// NavigateAndEval navigates in a dedicated tab, waits, evaluates JS, and returns result.
-// The tab is closed when done. This is the primary method for /fetch/js.
-func (b *Browser) NavigateAndEval(rawURL string, headers map[string]string, jsCode string, result interface{}) error {
-  ctx, cancel := context.WithTimeout(b.ctx, 90*time.Second)
+// NavigateAndEval navigates in a dedicated tab, waits sleepTime, evaluates JS, returns result.
+func (b *Browser) NavigateAndEval(rawURL string, headers map[string]string, jsCode string, sleepTime time.Duration, result interface{}) error {
+  ctx, cancel := context.WithTimeout(b.ctx, 120*time.Second)
   defer cancel()
 
   tabCtx, tabCancel := chromedp.NewContext(ctx)
@@ -195,41 +186,17 @@ func (b *Browser) NavigateAndEval(rawURL string, headers map[string]string, jsCo
 
   return chromedp.Run(tabCtx,
     chromedp.ActionFunc(func(ctx context.Context) error { return network.Enable().Do(ctx) }),
-    chromedp.ActionFunc(func(ctx context.Context) error {
-      patterns := []*network.BlockPattern{
-        {URLPattern: "*://*.piano.io/*", Block: true},
-        {URLPattern: "*://*.tinypass.com/*", Block: true},
-        {URLPattern: "*://*.poool.fr/*", Block: true},
-        {URLPattern: "*://*.permutive.com/*", Block: true},
-        {URLPattern: "*://*.zephr.com/*", Block: true},
-        {URLPattern: "*://*.cxense.com/*", Block: true},
-        {URLPattern: "*://*.blueconic.com/*", Block: true},
-        {URLPattern: "*://*.newrelic.com/*", Block: true},
-        {URLPattern: "*://*.nr-data.net/*", Block: true},
-        {URLPattern: "*://*.datadome.co/*", Block: true},
-        {URLPattern: "*://*.js.datadome.co/*", Block: true},
-        {URLPattern: "*://*.api-js.datadome.co/*", Block: true},
-      }
-      return network.SetBlockedURLs().WithURLPatterns(patterns).Do(ctx)
-    }),
+    chromedp.ActionFunc(func(ctx context.Context) error { return network.SetBlockedURLs().WithURLPatterns(blockedPatterns()).Do(ctx) }),
     chromedp.ActionFunc(func(ctx context.Context) error {
       if len(headers) == 0 { return nil }
       hdr := make(network.Headers)
       for k, v := range headers { hdr[k] = v }
       return network.SetExtraHTTPHeaders(network.Headers(hdr)).Do(ctx)
     }),
-    chromedp.ActionFunc(func(ctx context.Context) error {
-      _, err := page.AddScriptToEvaluateOnNewDocument(`(()=>{
-        Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-        Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
-        Object.defineProperty(navigator,'languages',{get:()=>['en-US','en','zh-CN']});
-        window.chrome={runtime:{}};
-      })()`).Do(ctx)
-      return err
-    }),
+    antiDetectionStep(),
     chromedp.Navigate(rawURL),
     chromedp.WaitReady("body"),
-    chromedp.Sleep(12*time.Second),
+    chromedp.Sleep(sleepTime),
     chromedp.Evaluate(jsCode, result),
   )
 }
