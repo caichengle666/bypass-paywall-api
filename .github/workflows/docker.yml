@@ -16,10 +16,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Clone BPC extension
-        run: |
-          git clone --depth 1 https://github.com/magnolia1234/bypass-paywalls-chrome-clean-master.git bpc-src/bypass-paywalls-chrome-clean-master
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 

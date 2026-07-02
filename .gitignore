@@ -3,8 +3,10 @@
 *linux-arm64
 *linux-amd64
 
-# Test scripts
+# Test scripts & debug
 test_*.py
+*.json
+*.log
 
 # Keys & secrets
 *.pem
@@ -15,11 +17,3 @@ test_*.py
 Thumbs.db
 .vscode/
 .idea/
-
-# BPC extension releases (keep source)
-*.xpi
-*.crx
-*.zip
-bpc-src/
-*.json
-*.log
