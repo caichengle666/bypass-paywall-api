@@ -4,9 +4,9 @@ import (
   "flag"
   "log"
   "os"
-  "github.com/user/wsj-unlock-go-v2/internal/api"
-  "github.com/user/wsj-unlock-go-v2/internal/browser"
-  "github.com/user/wsj-unlock-go-v2/internal/config"
+  "github.com/caichengle666/bypass-paywall-api/internal/api"
+  "github.com/caichengle666/bypass-paywall-api/internal/browser"
+  "github.com/caichengle666/bypass-paywall-api/internal/config"
 )
 
 func main() {

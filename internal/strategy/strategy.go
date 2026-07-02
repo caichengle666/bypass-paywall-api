@@ -3,7 +3,7 @@ package strategy
 import (
   "net/url"
   "strings"
-  "github.com/user/wsj-unlock-go-v2/internal/config"
+  "github.com/caichengle666/bypass-paywall-api/internal/config"
 )
 
 type Strategy struct {

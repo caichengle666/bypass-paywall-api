@@ -7,10 +7,10 @@ import (
   "net/http"
   "strings"
   "time"
-  "github.com/user/wsj-unlock-go-v2/internal/browser"
-  "github.com/user/wsj-unlock-go-v2/internal/config"
-  "github.com/user/wsj-unlock-go-v2/internal/extract"
-  "github.com/user/wsj-unlock-go-v2/internal/strategy"
+  "github.com/caichengle666/bypass-paywall-api/internal/browser"
+  "github.com/caichengle666/bypass-paywall-api/internal/config"
+  "github.com/caichengle666/bypass-paywall-api/internal/extract"
+  "github.com/caichengle666/bypass-paywall-api/internal/strategy"
 )
 
 type Server struct{

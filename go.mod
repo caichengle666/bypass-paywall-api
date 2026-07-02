@@ -1,4 +1,4 @@
-module github.com/user/wsj-unlock-go-v2
+module github.com/caichengle666/bypass-paywall-api
 
 go 1.26.4
 
