@@ -1,32 +1,17 @@
-# Binaries
-bpc-api.exe
-bpc-api
-*.exe~
+# Build artifacts
 *.exe
+*linux-arm64
+*linux-amd64
 
-# Temp files
-req.json
-bpc_out.txt
-bpc_err.txt
-homepage.html
-raw_homepage.json
-homepage_test.json
-homepage_v3.json
-cat_*.json
+# Test scripts
+test_*.py
 
-# IDE
-.vscode/
-.idea/
-*.swp
+# Keys & secrets
+*.pem
+*.key
 
-# OS
+# OS / IDE
 .DS_Store
 Thumbs.db
-
-# Go
-vendor/
-
-bpc-latest/
-
-*.html
-*.json
+.vscode/
+.idea/
