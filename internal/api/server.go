@@ -5,7 +5,6 @@ import (
   "fmt"
   "log"
   "net/http"
-
   "strings"
   "time"
   "github.com/user/wsj-unlock-go-v2/internal/browser"
@@ -34,18 +33,9 @@ type FetchResp struct {
   Latency    int64       `json:"latency_ms,omitempty"`
   Sections   *Homepage   `json:"sections,omitempty"`
 }
-type NavItem struct {
-  Label string `json:"label"`
-  Href  string `json:"href"`
-}
-type Section struct {
-  Section   string `json:"section"`
-  Articles  []Link `json:"articles"`
-}
-type Link struct {
-  URL   string `json:"url"`
-  Title string `json:"title"`
-}
+type NavItem struct { Label string `json:"label"`; Href string `json:"href"` }
+type Section struct { Section string `json:"section"`; Articles []Link `json:"articles"` }
+type Link struct { URL string `json:"url"`; Title string `json:"title"` }
 type Homepage struct {
   Navigation    []NavItem `json:"navigation"`
   Sections      []Section `json:"sections"`
@@ -57,8 +47,6 @@ type jsResult struct {
   ParagraphCount int        `json:"paragraphCount"`
   Sections       *Homepage  `json:"sections"`
 }
-
-var startTime = time.Now()
 
 func NewServer(bp *browser.Pool, cfg *config.SitesConfig) *Server { return &Server{bp: bp, cfg: cfg} }
 func (s *Server) SetAPIKey(key string) { s.apiKey = key }
@@ -133,15 +121,15 @@ func (s *Server) fetchJS(w http.ResponseWriter, r *http.Request) {
   if err != nil { writeErr(w, err.Error(), 400); return }
   strat, _ := strategy.ResolveStrategy(req.URL, s.cfg)
   start := time.Now()
+
   br, err := s.bp.Acquire()
   if err != nil { writeErr(w, "browser: "+err.Error(), 503); return }
   defer s.bp.Release(br)
-  _, err = br.Navigate(req.URL, strategy.BuildHeaders(strat, req.URL))
-  if err != nil { writeErr(w, "navigate: "+err.Error(), 504); return }
+
   var result jsResult
-  if err := br.Evaluate(&result, extract.ArticleExtractionJS); err != nil {
-    writeErr(w, "js: "+err.Error(), 500); return
-  }
+  err = br.NavigateAndEval(req.URL, strategy.BuildHeaders(strat, req.URL), extract.ArticleExtractionJS, &result)
+  if err != nil { writeErr(w, "navigate/js: "+err.Error(), 504); return }
+
   resp := FetchResp{
     Success: result.ParagraphCount > 0 || result.Sections != nil,
     URL: req.URL, Title: result.Title,
