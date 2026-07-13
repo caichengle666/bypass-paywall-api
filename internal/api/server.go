@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ type Server struct {
 
 type FetchReq struct {
 	URL     string `json:"url"`
+	Query   string `json:"q,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 	Timeout int    `json:"timeout,omitempty"`
 	Sleep   int    `json:"sleep,omitempty"`
 	Force   bool   `json:"force,omitempty"`
@@ -43,6 +46,9 @@ type FetchResp struct {
 	Cached     bool      `json:"cached,omitempty"`
 	Sections   *Homepage `json:"sections,omitempty"`
 	Articles   []Link    `json:"articles,omitempty"`
+	Query      string    `json:"query,omitempty"`
+	Results    []Link    `json:"results,omitempty"`
+	Count      int       `json:"count,omitempty"`
 }
 
 type NavItem struct {
@@ -96,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/article", s.article)
 	mux.HandleFunc("/home", s.home)
+	mux.HandleFunc("/search", s.search)
 	mux.HandleFunc("/fetch", s.fetch)
 	mux.HandleFunc("/fetch/js", s.fetchJS)
 	mux.HandleFunc("/sites", s.sitesList)
@@ -160,6 +167,7 @@ func computeSleep(req *FetchReq) time.Duration {
 
 func (s *Server) article(w http.ResponseWriter, r *http.Request) { s.fetchJSWithMode(w, r, "article") }
 func (s *Server) home(w http.ResponseWriter, r *http.Request)    { s.fetchJSWithMode(w, r, "home") }
+func (s *Server) search(w http.ResponseWriter, r *http.Request)  { s.fetchSearch(w, r) }
 
 func (s *Server) fetch(w http.ResponseWriter, r *http.Request) {
 	req, err := parseReq(r)
@@ -193,6 +201,45 @@ func (s *Server) fetch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) fetchJS(w http.ResponseWriter, r *http.Request) { s.fetchJSWithMode(w, r, "fetch") }
 
+func (s *Server) fetchSearch(w http.ResponseWriter, r *http.Request) {
+	req, err := parseReq(r)
+	if err != nil {
+		writeErr(w, err.Error(), 400)
+		return
+	}
+	if req.URL == "" {
+		req.URL = "https://cn.wsj.com/zh-hans/search?query=" + url.QueryEscape(req.Query)
+	}
+	cacheKey := "search:" + normalizeURL(req.URL) + ":" + strings.ToLower(strings.TrimSpace(req.Query))
+	if !req.Force {
+		if resp, ok := s.cacheGet(cacheKey); ok {
+			resp.Cached = true
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	resp := s.fetchJSResult(req)
+	if resp.Status == "ok" {
+		resp.Query = req.Query
+		resp.Results = filterSearchResults(resp.Articles, req.Query, req.Limit)
+		resp.Count = len(resp.Results)
+		resp.Articles = resp.Results
+		if resp.Count == 0 {
+			resp.Success = false
+			resp.Status = "no_content"
+			resp.SiteStatus = "no_results"
+			resp.Error = "no_results"
+		}
+	}
+	ttl := homeCacheTTL
+	if !resp.Success {
+		ttl = failedCacheTTL
+	}
+	s.cacheSet(cacheKey, resp, ttl)
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (s *Server) fetchJSWithMode(w http.ResponseWriter, r *http.Request, mode string) {
 	req, err := parseReq(r)
 	if err != nil {
@@ -208,23 +255,32 @@ func (s *Server) fetchJSWithMode(w http.ResponseWriter, r *http.Request, mode st
 		}
 	}
 
+	resp := s.fetchJSResult(req)
+
+	ttl := articleCacheTTL
+	if mode == "home" {
+		ttl = homeCacheTTL
+	}
+	if !resp.Success {
+		ttl = failedCacheTTL
+	}
+	s.cacheSet(cacheKey, resp, ttl)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) fetchJSResult(req *FetchReq) FetchResp {
 	strat, _ := strategy.ResolveStrategy(req.URL, s.cfg)
 	start := time.Now()
 	br, err := s.bp.Acquire()
 	if err != nil {
-		writeErr(w, "browser: "+err.Error(), 503)
-		return
+		return FetchResp{Success: false, URL: req.URL, Status: "error", SiteStatus: "browser_unavailable", Error: "browser: " + err.Error(), Latency: time.Since(start).Milliseconds()}
 	}
 	defer s.bp.Release(br)
 
 	var result jsResult
 	err = br.NavigateAndEval(req.URL, strategy.BuildHeaders(strat, req.URL), extract.ArticleExtractionJS, computeSleep(req), &result)
 	if err != nil {
-		resp := FetchResp{Success: false, URL: req.URL, Status: "error", SiteStatus: "timeout", Error: "navigate/js: " + err.Error(), Latency: time.Since(start).Milliseconds()}
-		s.cacheSet(cacheKey, resp, failedCacheTTL)
-		w.WriteHeader(504)
-		json.NewEncoder(w).Encode(resp)
-		return
+		return FetchResp{Success: false, URL: req.URL, Status: "error", SiteStatus: "timeout", Error: "navigate/js: " + err.Error(), Latency: time.Since(start).Milliseconds()}
 	}
 
 	resp := FetchResp{
@@ -245,20 +301,52 @@ func (s *Server) fetchJSWithMode(w http.ResponseWriter, r *http.Request, mode st
 	if !resp.Success {
 		resp.Error = resp.SiteStatus
 	}
-
-	ttl := articleCacheTTL
-	if mode == "home" {
-		ttl = homeCacheTTL
-	}
-	if !resp.Success {
-		ttl = failedCacheTTL
-	}
-	s.cacheSet(cacheKey, resp, ttl)
-	json.NewEncoder(w).Encode(resp)
+	return resp
 }
 
 func normalizeURL(rawURL string) string {
 	return strings.TrimSpace(strings.TrimRight(rawURL, "/"))
+}
+
+func filterSearchResults(articles []Link, query string, limit int) []Link {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	seen := map[string]bool{}
+	out := []Link{}
+	for _, article := range articles {
+		if len(out) >= limit {
+			break
+		}
+		if !isNewsLink(article) || seen[article.URL] {
+			continue
+		}
+		if query != "" {
+			text := strings.ToLower(article.Title + " " + article.URL)
+			if !strings.Contains(text, query) {
+				continue
+			}
+		}
+		seen[article.URL] = true
+		out = append(out, article)
+	}
+	return out
+}
+
+func isNewsLink(article Link) bool {
+	u := strings.ToLower(article.URL)
+	t := strings.TrimSpace(article.Title)
+	if len(t) < 5 {
+		return false
+	}
+	blocked := []string{"/market-data/", "/news/author/", "/zh-hans/news/", "/zh-hans/search", "/zh-hans$", "login", "subscribe", "privacy", "terms"}
+	for _, part := range blocked {
+		if strings.Contains(u, part) {
+			return false
+		}
+	}
+	return strings.Contains(u, "/articles/")
 }
 
 func classifyResult(resp FetchResp) (string, string) {
@@ -355,6 +443,10 @@ func parseReq(r *http.Request) (*FetchReq, error) {
 		}
 	} else {
 		req.URL = r.URL.Query().Get("url")
+		req.Query = r.URL.Query().Get("q")
+		if v := r.URL.Query().Get("limit"); v != "" {
+			fmt.Sscanf(v, "%d", &req.Limit)
+		}
 		if v := r.URL.Query().Get("sleep"); v != "" {
 			fmt.Sscanf(v, "%d", &req.Sleep)
 		}
@@ -364,8 +456,8 @@ func parseReq(r *http.Request) (*FetchReq, error) {
 		force := strings.ToLower(r.URL.Query().Get("force"))
 		req.Force = force == "1" || force == "true" || force == "yes"
 	}
-	if req.URL == "" {
-		return nil, fmt.Errorf("url required")
+	if req.URL == "" && req.Query == "" {
+		return nil, fmt.Errorf("url or q required")
 	}
 	return &req, nil
 }

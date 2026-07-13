@@ -64,7 +64,9 @@
     if(href.indexOf("#")>=0)href=href.split("#")[0];
     var l=href.toLowerCase();
     if(/(search|login|subscribe|signup|register|password|privacy|terms|cookie|careers|about|contact)/.test(l))return;
+    if(/(market-data|\/news\/author\/|\/zh-hans\/news\/|\/zh-hans$)/.test(l))return;
     if(/doubleclick\.net|googlesyndication|googleadservices|amazon-adsystem|outbrain\.com/.test(l))return;
+    if(domain==='cn.wsj.com' && l.indexOf('/articles/')<0)return;
     var t=(a.innerText||"").trim();
     if(t.length<5) return;
 
@@ -103,7 +105,7 @@
     sections.push({section:k,articles:groups[k].slice(0,15)});
   });
   if(groups["General"]&&groups["General"].length>0){
-    sections.push({section:"General",articles:groups["General"].slice(0,20)});
+    sections.push({section:"General",articles:groups["General"].slice(0,80)});
   }
   sections.sort(function(a,b){
     var ai=known.indexOf(a.section.toLowerCase());if(ai<0)ai=999;
