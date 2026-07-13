@@ -59,9 +59,10 @@ type Link struct {
 }
 
 type Homepage struct {
-	Navigation    []NavItem `json:"navigation"`
-	Sections      []Section `json:"sections"`
-	TotalArticles int       `json:"total_articles"`
+	Navigation      []NavItem `json:"navigation"`
+	Sections        []Section `json:"sections"`
+	TotalArticles   int       `json:"total_articles"`
+	TotalArticlesJS int       `json:"totalArticles,omitempty"`
 }
 
 type jsResult struct {
@@ -231,6 +232,7 @@ func (s *Server) fetchJSWithMode(w http.ResponseWriter, r *http.Request, mode st
 		Source: "js_injection", Latency: time.Since(start).Milliseconds(),
 	}
 	if result.Sections != nil {
+		normalizeHomepage(result.Sections)
 		resp.Sections = result.Sections
 		resp.Articles = flattenArticles(result.Sections)
 	}
@@ -274,6 +276,7 @@ func classifyResult(resp FetchResp) (string, string) {
 }
 
 func flattenArticles(home *Homepage) []Link {
+	normalizeHomepage(home)
 	if home == nil {
 		return nil
 	}
@@ -289,6 +292,20 @@ func flattenArticles(home *Homepage) []Link {
 		}
 	}
 	return out
+}
+
+func normalizeHomepage(home *Homepage) {
+	if home == nil {
+		return
+	}
+	if home.TotalArticles == 0 {
+		home.TotalArticles = home.TotalArticlesJS
+	}
+	if home.TotalArticles == 0 {
+		for _, section := range home.Sections {
+			home.TotalArticles += len(section.Articles)
+		}
+	}
 }
 
 func (s *Server) cacheGet(key string) (FetchResp, bool) {
