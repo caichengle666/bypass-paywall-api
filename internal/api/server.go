@@ -223,6 +223,9 @@ func (s *Server) fetchSearch(w http.ResponseWriter, r *http.Request) {
 	if resp.Status == "ok" {
 		resp.Query = req.Query
 		resp.Results = filterSearchResults(resp.Articles, req.Query, req.Limit)
+		if len(resp.Results) == 0 {
+			resp.Results = snippetSearchResults(resp.Paragraphs, req.Query, req.Limit)
+		}
 		resp.Count = len(resp.Results)
 		resp.Articles = resp.Results
 		if resp.Count == 0 {
@@ -309,9 +312,7 @@ func normalizeURL(rawURL string) string {
 }
 
 func filterSearchResults(articles []Link, query string, limit int) []Link {
-	if limit <= 0 || limit > 50 {
-		limit = 10
-	}
+	limit = normalizeLimit(limit)
 	query = strings.ToLower(strings.TrimSpace(query))
 	seen := map[string]bool{}
 	out := []Link{}
@@ -332,6 +333,33 @@ func filterSearchResults(articles []Link, query string, limit int) []Link {
 		out = append(out, article)
 	}
 	return out
+}
+
+func snippetSearchResults(paragraphs []string, query string, limit int) []Link {
+	limit = normalizeLimit(limit)
+	query = strings.ToLower(strings.TrimSpace(query))
+	out := []Link{}
+	for _, paragraph := range paragraphs {
+		if len(out) >= limit {
+			break
+		}
+		text := strings.TrimSpace(paragraph)
+		if len(text) < 20 {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(text), query) {
+			continue
+		}
+		out = append(out, Link{Title: text})
+	}
+	return out
+}
+
+func normalizeLimit(limit int) int {
+	if limit <= 0 || limit > 50 {
+		return 10
+	}
+	return limit
 }
 
 func isNewsLink(article Link) bool {
