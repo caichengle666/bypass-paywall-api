@@ -67,6 +67,13 @@ docker run -d -p 8080:8080 -e BPC_API_KEY=mykey bpc-api -proxy socks5://host:por
 ### `POST /fetch`
 通过 HTML 解析提取（备选方案）。
 
+### `POST /search`
+搜索 WSJ 中文网、BBC 或 The Economist。`site` 可取 `wsj`、`bbc`、`economist`；省略时默认 WSJ。也可以通过 `url` 直接指定搜索页。
+
+```json
+{ "site": "economist", "q": "china", "sleep": 30, "limit": 10 }
+```
+
 ### `GET /health`
 健康检查。
 

@@ -25,6 +25,7 @@ type Server struct {
 
 type FetchReq struct {
 	URL     string `json:"url"`
+	Site    string `json:"site,omitempty"`
 	Query   string `json:"q,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
 	Timeout int    `json:"timeout,omitempty"`
@@ -208,7 +209,11 @@ func (s *Server) fetchSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.URL == "" {
-		req.URL = "https://cn.wsj.com/zh-hans/search?query=" + url.QueryEscape(req.Query)
+		req.URL, err = searchURL(req.Site, req.Query)
+		if err != nil {
+			writeErr(w, err.Error(), 400)
+			return
+		}
 	}
 	cacheKey := "search:" + normalizeURL(req.URL) + ":" + strings.ToLower(strings.TrimSpace(req.Query))
 	if !req.Force {
@@ -374,7 +379,34 @@ func isNewsLink(article Link) bool {
 			return false
 		}
 	}
-	return strings.Contains(u, "/articles/")
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimPrefix(parsed.Hostname(), "www.")
+	switch host {
+	case "economist.com":
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		return len(parts) >= 5 && len(parts[1]) == 4 && len(parts[2]) == 2 && len(parts[3]) == 2
+	case "bbc.com", "bbc.co.uk":
+		return strings.Contains(parsed.Path, "/news/articles/")
+	default:
+		return strings.Contains(parsed.Path, "/articles/")
+	}
+}
+
+func searchURL(site, query string) (string, error) {
+	q := url.QueryEscape(strings.TrimSpace(query))
+	switch strings.ToLower(strings.TrimSpace(site)) {
+	case "", "wsj":
+		return "https://cn.wsj.com/zh-hans/search?query=" + q, nil
+	case "bbc":
+		return "https://www.bbc.com/search?q=" + q, nil
+	case "economist", "the-economist":
+		return "https://www.economist.com/search?q=" + q, nil
+	default:
+		return "", fmt.Errorf("unsupported search site: %s", site)
+	}
 }
 
 func classifyResult(resp FetchResp) (string, string) {
@@ -471,6 +503,7 @@ func parseReq(r *http.Request) (*FetchReq, error) {
 		}
 	} else {
 		req.URL = r.URL.Query().Get("url")
+		req.Site = r.URL.Query().Get("site")
 		req.Query = r.URL.Query().Get("q")
 		if v := r.URL.Query().Get("limit"); v != "" {
 			fmt.Sscanf(v, "%d", &req.Limit)
