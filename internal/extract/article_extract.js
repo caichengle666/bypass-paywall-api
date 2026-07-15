@@ -86,8 +86,9 @@
 
     var p3=a.closest("h1,h2,h3,h4,h5");
     if(p3){var pt=(p3.innerText||"").trim();if(pt.length>t.length)t=pt;}
+    var preferredTitle=!!p3||a.getAttribute("data-testid")==="flexcard-headline";
 
-    if(!urlMap[href]||t.length>urlMap[href].title.length) urlMap[href]={url:href,title:t,section:sec||"General"};
+    if(!urlMap[href]||(preferredTitle&&!urlMap[href].preferredTitle)||(!urlMap[href].preferredTitle&&t.length>urlMap[href].title.length)) urlMap[href]={url:href,title:t,section:sec||"General",preferredTitle:preferredTitle};
   });
 
   var all=Object.values(urlMap);
