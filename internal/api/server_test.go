@@ -42,3 +42,14 @@ func TestIsNewsLink(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterSearchResultsPrefersMarkedWSJResults(t *testing.T) {
+	articles := []Link{
+		{URL: "https://cn.wsj.com/articles/trending-123?mod=trending_now", Title: "中东热门文章"},
+		{URL: "https://cn.wsj.com/articles/iran-456?mod=Searchresults&pos=1", Title: "伊朗局势最新进展"},
+	}
+	got := filterSearchResults(articles, "中东", 10)
+	if len(got) != 1 || got[0].Title != "伊朗局势最新进展" {
+		t.Fatalf("filterSearchResults() = %#v; want marked WSJ result", got)
+	}
+}

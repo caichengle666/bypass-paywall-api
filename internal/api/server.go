@@ -319,6 +319,9 @@ func normalizeURL(rawURL string) string {
 func filterSearchResults(articles []Link, query string, limit int) []Link {
 	limit = normalizeLimit(limit)
 	query = strings.ToLower(strings.TrimSpace(query))
+	if marked := markedSearchResults(articles, limit); len(marked) > 0 {
+		return marked
+	}
 	seen := map[string]bool{}
 	out := []Link{}
 	for _, article := range articles {
@@ -333,6 +336,26 @@ func filterSearchResults(articles []Link, query string, limit int) []Link {
 			if !strings.Contains(text, query) {
 				continue
 			}
+		}
+		seen[article.URL] = true
+		out = append(out, article)
+	}
+	return out
+}
+
+func markedSearchResults(articles []Link, limit int) []Link {
+	seen := map[string]bool{}
+	out := []Link{}
+	for _, article := range articles {
+		if len(out) >= limit {
+			break
+		}
+		parsed, err := url.Parse(article.URL)
+		if err != nil || !strings.EqualFold(parsed.Query().Get("mod"), "Searchresults") {
+			continue
+		}
+		if !isNewsLink(article) || seen[article.URL] {
+			continue
 		}
 		seen[article.URL] = true
 		out = append(out, article)

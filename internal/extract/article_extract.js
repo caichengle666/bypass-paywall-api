@@ -63,7 +63,8 @@
     if(!href.startsWith("http"))return;
     if(href.indexOf("#")>=0)href=href.split("#")[0];
     var l=href.toLowerCase();
-    if(/(search|login|subscribe|signup|register|password|privacy|terms|cookie|careers|about|contact)/.test(l))return;
+    var path=u.pathname.toLowerCase();
+    if(/(^|\/)(search|login|subscribe|signup|register|password|privacy|terms|cookie|careers|about|contact)(\/|$)/.test(path))return;
     if(/(market-data|\/news\/author\/|\/zh-hans\/news\/|\/zh-hans$)/.test(l))return;
     if(/doubleclick\.net|googlesyndication|googleadservices|amazon-adsystem|outbrain\.com/.test(l))return;
     if(domain==='cn.wsj.com' && l.indexOf('/articles/')<0)return;
